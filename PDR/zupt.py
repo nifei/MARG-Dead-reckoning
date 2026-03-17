@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import imufusion
 from scipy import signal
 
+G0 = 9.80665
+
 
 def zupt(
     df,
@@ -13,13 +15,16 @@ def zupt(
     margin=0.1,
     debug=False,
     lp_filter=False,
+    save_dir=None,
+    show=False,
+    return_data=False,
 ):
     plt.style.use("default")
 
     df = df.copy().reset_index()
     df.index /= sample_rate
     df["gyro"] *= 180 / np.pi
-    # df['accel'] /= 9.80665
+    df["accel"] /= G0
 
     dt = 1 / sample_rate
     margin = int(margin * sample_rate)  # 100 ms
@@ -46,13 +51,13 @@ def zupt(
     def update(x):
         # ahrs.update(x['gyro'].to_numpy(), x['accel'].to_numpy(), x['mag'].to_numpy(), 0.005)
         ahrs.update_no_magnetometer(
-            x["gyro"].to_numpy(), x["accel"].to_numpy(), 0.005
+            x["gyro"].to_numpy(), x["accel"].to_numpy(), dt
         )
 
         euler = ahrs.quaternion.to_euler()
         Q = ahrs.quaternion.wxyz
         # acceleration = ahrs.earth_acceleration * 9.80665  # convert g to m/s/
-        acceleration = ahrs.earth_acceleration  # convert g to m/s/
+        acceleration = ahrs.earth_acceleration * G0
 
         ans = {}
         ans.update(
@@ -124,7 +129,8 @@ def zupt(
     for axes in ax:
         axes.set_xlim(0, sf.index.max())
 
-    fig.savefig(f"ypr.png", dpi=300)
+    ypr_path = f"ypr.png" if save_dir is None else f"{save_dir}/ypr.png"
+    fig.savefig(ypr_path, dpi=300)
 
     from scipy.signal import find_peaks
 
@@ -132,7 +138,6 @@ def zupt(
     cols = pd.MultiIndex.from_product([["acceleration"], ["x", "y", "z"]])
     hf = pd.DataFrame(hf, columns=pd.MultiIndex.from_tuples(cols))
 
-    # subtract earth gravity
     g_end = np.linalg.norm(hf["acceleration"], axis=1)[-100:].mean()
     g_start = abs(hf["acceleration", "z"][-100:].mean())
     g = min(g_start, g_end)
@@ -148,7 +153,7 @@ def zupt(
     )
 
     ax[0].plot(
-        hf["acceleration"].apply(np.linalg.norm, axis=1) - g, label="norm"
+        hf["acceleration"].apply(np.linalg.norm, axis=1), label="norm"
     )
     ax[1].plot(hf["is_moving"], label="is_moving")
 
@@ -171,11 +176,19 @@ def zupt(
     ax[0].set_ylim(0, 10)
 
     if debug:
-        fig.savefig(f"zupt.png", dpi=300)
+        zupt_path = (
+            f"zupt.png" if save_dir is None else f"{save_dir}/zupt.png"
+        )
+        fig.savefig(zupt_path, dpi=300)
         for axes in ax:
             l = len(hf)
             axes.set_xlim(l / 2 - l / 10, l / 2 + l / 10)
-        fig.savefig(f"zupt_zoom.png", dpi=300)
+        zupt_zoom_path = (
+            f"zupt_zoom.png"
+            if save_dir is None
+            else f"{save_dir}/zupt_zoom.png"
+        )
+        fig.savefig(zupt_zoom_path, dpi=300)
 
     peaks, _ = find_peaks(hf["is_moving"].astype(int))
     steps = len(peaks)
@@ -186,7 +199,10 @@ def zupt(
     cols = pd.MultiIndex.from_product([["velocity"], ["x", "y", "z"]])
     hf[cols] = hf["acceleration"] * dt
     for idx in range(1, len(hf)):
-        if hf.loc[idx, "is_moving"][0]:
+        # Pandas versions may return either a scalar bool or a 1-element array-like.
+        moving = hf.loc[idx, "is_moving"]
+        moving = moving[0] if hasattr(moving, "__len__") and not np.isscalar(moving) else moving
+        if bool(moving):
             velocity[idx] = velocity[idx - 1] + hf.loc[idx, "velocity"]
 
     hf["velocity"] = velocity
@@ -263,7 +279,12 @@ def zupt(
     ax[4].grid()
     ax[4].legend()
 
-    fig.savefig(f"path_{len(peaks)}.png", dpi=300)
+    path_png = (
+        f"path_{len(peaks)}.png"
+        if save_dir is None
+        else f"{save_dir}/path_{len(peaks)}.png"
+    )
+    fig.savefig(path_png, dpi=300)
 
     # plot position 2D
 
@@ -282,5 +303,23 @@ def zupt(
     axes.legend()
     axes.grid()
 
-    fig.savefig(f"path2D_{fn}.png", dpi=300)
-    plt.show()
+    path2d_png = (
+        f"path2D_{fn}.png"
+        if save_dir is None
+        else f"{save_dir}/path2D_{fn}.png"
+    )
+    fig.savefig(path2d_png, dpi=300)
+    if show:
+        plt.show()
+    plt.close("all")
+
+    if return_data:
+        return {
+            "sf": sf.copy(),
+            "hf": hf.copy(),
+            "steps": int(steps),
+            "g_est": float(g),
+            "ypr_png": ypr_path,
+            "path_png": path_png,
+            "path2d_png": path2d_png,
+        }

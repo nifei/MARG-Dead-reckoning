@@ -1,0 +1,20 @@
+{
+  "segment": "seg_20260315_full_part04",
+  "uimu_file": "/Users/nifei/Downloads/code/research_loc/data/GNSS-IMU-Logger/UIMU_Log/V2307A__IMU__20260315093038.txt",
+  "satellite_time_window_source": "/Users/nifei/Downloads/code/research_loc/data/bison_input/seg_20260315_full_part04/satellite_lla.csv",
+  "start_unix_ms": 1773542209000,
+  "end_unix_ms": 1773542855000,
+  "raw_counts": {
+    "acc": 540704,
+    "gyro": 540704,
+    "mag": 135176
+  },
+  "paired_rows": 334831,
+  "sample_rate_hz": 499.9766360710454,
+  "outputs": {
+    "paired_csv": "/Users/nifei/Downloads/code/research_loc/PDR/MARG-Dead-reckoning/output/seg_20260315_full_part04_from_uimu/paired_imu_for_pdr.csv",
+    "ypr_png": "/Users/nifei/Downloads/code/research_loc/PDR/MARG-Dead-reckoning/output/seg_20260315_full_part04_from_uimu/ypr.png",
+    "path_png": "/Users/nifei/Downloads/code/research_loc/PDR/MARG-Dead-reckoning/output/seg_20260315_full_part04_from_uimu/path_*.png",
+    "path2d_png": "/Users/nifei/Downloads/code/research_loc/PDR/MARG-Dead-reckoning/output/seg_20260315_full_part04_from_uimu/path2D_seg_20260315_full_part04_from_uimu.png"
+  }
+}
