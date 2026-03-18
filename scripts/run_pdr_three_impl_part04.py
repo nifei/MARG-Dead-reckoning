@@ -212,6 +212,106 @@ def estimate_frequency_hz(t_sec: np.ndarray) -> float:
     return float(1.0 / np.median(dt))
 
 
+def resolve_calib_csv(calib_csv_arg: str | None, repo_root: Path) -> Path | None:
+    if calib_csv_arg:
+        p = Path(calib_csv_arg).resolve()
+        return p if p.exists() else None
+    candidates = [
+        repo_root / "data" / "calib" / "calib.csv",
+        repo_root / "PDR" / "MARG-Dead-reckoning" / "calib.csv",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
+def candidate_uimu_files(repo_root: Path) -> list[Path]:
+    out: list[Path] = []
+    scan_dirs = [
+        repo_root / "data" / "GNSS-IMU-Logger" / "UIMU_Log",
+        repo_root / "data" / "0317-GNSS-IMU-Logger" / "UIMU_Log",
+        repo_root / "data" / "calib" / "UIMU_Log",
+    ]
+    for d in scan_dirs:
+        if not d.exists():
+            continue
+        for p in sorted(d.glob("*.txt")):
+            if p not in out:
+                out.append(p)
+    return out
+
+
+def select_uimu_file(
+    repo_root: Path,
+    explicit_file: Path | None,
+    start_ms: int,
+    end_ms: int,
+) -> tuple[Path, list[ImuRow], list[ImuRow], list[ImuRow], dict[str, object]]:
+    if explicit_file is not None:
+        acc_rows, gyr_rows, mag_rows = parse_uimu_window(explicit_file, start_ms, end_ms)
+        return explicit_file, acc_rows, gyr_rows, mag_rows, {"mode": "explicit", "tested": 1}
+
+    best: tuple[int, Path, list[ImuRow], list[ImuRow], list[ImuRow]] | None = None
+    tested = 0
+    for f in candidate_uimu_files(repo_root):
+        tested += 1
+        acc_rows, gyr_rows, mag_rows = parse_uimu_window(f, start_ms, end_ms)
+        paired_n = min(len(acc_rows), len(gyr_rows), len(mag_rows))
+        if best is None or paired_n > best[0]:
+            best = (paired_n, f, acc_rows, gyr_rows, mag_rows)
+    if best is None:
+        raise FileNotFoundError("no UIMU_Log candidates found")
+    return best[1], best[2], best[3], best[4], {
+        "mode": "auto_best_overlap",
+        "tested": tested,
+        "best_paired_rows": int(best[0]),
+    }
+
+
+def load_calib(calib_csv: Path | None) -> tuple[dict[str, np.ndarray], dict[str, object]]:
+    zero = np.zeros(3, dtype=float)
+    eye = np.eye(3, dtype=float)
+    if calib_csv is None:
+        return (
+            {"acc_b": zero, "gyro_b": zero, "mag_b": zero, "mag_A": eye},
+            {"loaded": False, "calib_csv": "", "fallback_identity": True},
+        )
+    try:
+        calib = pd.read_csv(calib_csv, sep="\t", header=[0, 1], index_col=[0, 1]).T
+        acc_b = calib.loc["b", "b"]["accel"].to_numpy(dtype=float)
+        gyro_b = calib.loc["b", "b"]["gyro"].to_numpy(dtype=float)
+        mag_b = calib.loc["b", "b"]["mag"].to_numpy(dtype=float)
+        mag_A = calib.loc["A"]["mag"].to_numpy(dtype=float)
+        return (
+            {"acc_b": acc_b, "gyro_b": gyro_b, "mag_b": mag_b, "mag_A": mag_A},
+            {"loaded": True, "calib_csv": str(calib_csv), "fallback_identity": False},
+        )
+    except Exception:
+        return (
+            {"acc_b": zero, "gyro_b": zero, "mag_b": zero, "mag_A": eye},
+            {"loaded": False, "calib_csv": str(calib_csv), "fallback_identity": True},
+        )
+
+
+def apply_calib(
+    acc_mps2: np.ndarray,
+    gyr_radps: np.ndarray,
+    mag_uT: np.ndarray,
+    calib: dict[str, np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    # Match original PDR/pdr.py behavior: subtract per-sensor bias and apply mag soft-iron matrix.
+    acc_corr = acc_mps2 - calib["acc_b"]
+    gyr_corr = gyr_radps - calib["gyro_b"]
+    mag_debiased = mag_uT - calib["mag_b"]
+    mag_corr = (calib["mag_A"] @ mag_debiased.T).T
+    for i in range(10):
+        print("accel:", acc_mps2[300 + i], '->', acc_corr[300 + i])
+        print("gyro:", gyr_radps[300 + i], '->', gyr_corr[300 + i])
+        print("mag:", mag_uT[300 + i], '->', mag_corr[300 + i])
+    return acc_corr, gyr_corr, mag_corr
+
+
 def quat_to_rot_mat(q: np.ndarray) -> np.ndarray:
     r00 = 2 * (q[0] * q[0] + q[1] * q[1]) - 1
     r01 = 2 * (q[1] * q[2] - q[0] * q[3])
@@ -688,6 +788,7 @@ def main() -> None:
     p.add_argument("--segment", default="seg_20260315_full_part04")
     p.add_argument("--satellite-csv", default=None, help="Override satellite_lla.csv path")
     p.add_argument("--uimu-file", default=None, help="Override UIMU_Log file path")
+    p.add_argument("--calib-csv", default=None, help="Override calib.csv path")
     p.add_argument("--in-dir", default=None, help="Override input directory for prepared PDR CSVs")
     p.add_argument("--out-dir", default=None, help="Override output directory for PDR results")
     args = p.parse_args()
@@ -700,11 +801,7 @@ def main() -> None:
         if args.satellite_csv
         else repo_root / "data" / "bison_input" / seg / "satellite_lla.csv"
     )
-    uimu_file = (
-        Path(args.uimu_file).resolve()
-        if args.uimu_file
-        else repo_root / "data" / "GNSS-IMU-Logger" / "UIMU_Log" / "V2307A__IMU__20260315093038.txt"
-    )
+    explicit_uimu_file = Path(args.uimu_file).resolve() if args.uimu_file else None
 
     in_dir = Path(args.in_dir).resolve() if args.in_dir else (repo_root / "data" / "pdr_input" / seg)
     out_dir = Path(args.out_dir).resolve() if args.out_dir else (repo_root / "PDR" / "output" / f"{seg}_three_impl")
@@ -713,7 +810,9 @@ def main() -> None:
 
     imu_input_csv = in_dir / "paired_imu_for_pdr.csv"
     start_ms, end_ms = read_satellite_time_window_ms(segment_sat_csv)
-    acc_rows, gyr_rows, mag_rows = parse_uimu_window(uimu_file, start_ms, end_ms)
+    uimu_file, acc_rows, gyr_rows, mag_rows, uimu_select_meta = select_uimu_file(
+        repo_root, explicit_uimu_file, start_ms, end_ms
+    )
     t_sec_abs, acc_mps2, gyr_radps, mag_uT = pair_acc_gyro_mag(acc_rows, gyr_rows, mag_rows)
     if len(t_sec_abs) < 10:
         if imu_input_csv.exists():
@@ -743,6 +842,9 @@ def main() -> None:
             )
     if len(t_sec_abs) < 10:
         raise RuntimeError("paired rows are too few after fallback")
+    calib_csv = resolve_calib_csv(args.calib_csv, repo_root)
+    calib_data, calib_meta = load_calib(calib_csv)
+    acc_mps2, gyr_radps, mag_uT = apply_calib(acc_mps2, gyr_radps, mag_uT, calib_data)
     freq_hz = estimate_frequency_hz(t_sec_abs)
 
     pd.DataFrame(
@@ -929,7 +1031,13 @@ def main() -> None:
         "segment": seg,
         "inputs": {
             "uimu_file": str(uimu_file),
+            "uimu_select_mode": str(uimu_select_meta.get("mode", "")),
+            "uimu_select_tested_files": int(uimu_select_meta.get("tested", 0)),
+            "uimu_best_paired_rows": int(uimu_select_meta.get("best_paired_rows", len(t_sec_abs))),
             "satellite_lla": str(segment_sat_csv),
+            "calib_csv": calib_meta["calib_csv"],
+            "calib_loaded": bool(calib_meta["loaded"]),
+            "calib_fallback_identity": bool(calib_meta["fallback_identity"]),
             "prepared_imu_csv": str(imu_input_csv),
             "prepared_gnss_csv": str(gnss_csv),
         },

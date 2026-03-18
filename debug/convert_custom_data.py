@@ -135,7 +135,7 @@ def main():
     )
     parser.add_argument(
         "--output", 
-        default="capture/handheld_nifei_rect.csv",
+        default="capture/full_handheld_nifei_rect.csv",
         help="输出文件路径 (默认: capture/handheld_nifei_rect.csv)"
     )
     parser.add_argument(

@@ -173,11 +173,46 @@ def wrap180(x: np.ndarray) -> np.ndarray:
     return (x + 180.0) % 360.0 - 180.0
 
 
+def resolve_calib_csv(calib_csv_arg: str | None, repo_root: Path) -> Path | None:
+    if calib_csv_arg:
+        p = Path(calib_csv_arg).resolve()
+        return p if p.exists() else None
+    candidates = [
+        repo_root / "data" / "calib" / "calib.csv",
+        repo_root / "PDR" / "MARG-Dead-reckoning" / "calib.csv",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
+def read_pdr_calib_meta(out_dir: Path) -> dict[str, object]:
+    out = {
+        "loaded": False,
+        "calib_csv": "",
+        "fallback_identity": True,
+    }
+    summary_json = out_dir / "summary.json"
+    if not summary_json.exists():
+        return out
+    try:
+        summary = json.loads(summary_json.read_text(encoding="utf-8"))
+        inputs = summary.get("inputs", {})
+        out["loaded"] = bool(inputs.get("calib_loaded", False))
+        out["calib_csv"] = str(inputs.get("calib_csv", "") or "")
+        out["fallback_identity"] = bool(inputs.get("calib_fallback_identity", True))
+        return out
+    except Exception:
+        return out
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Build zupt-aided-mag-gnss trajectory from GNSS Fix constraints.")
     p.add_argument("--segment", default="seg_20260315_full_part04")
     p.add_argument("--satellite-csv", default=None, help="Override satellite_lla.csv path")
     p.add_argument("--raw-file", default=None, help="Override GNSS Raw_Log file path")
+    p.add_argument("--calib-csv", default=None, help="Override calib.csv path")
     p.add_argument("--in-dir", default=None, help="Override data/pdr_input/<segment> directory")
     p.add_argument("--out-dir", default=None, help="Override PDR/output/<segment>_three_impl directory")
     args = p.parse_args()
@@ -191,6 +226,7 @@ def main() -> None:
 
     sat_csv = Path(args.satellite_csv).resolve() if args.satellite_csv else (root / "data" / "bison_input" / seg / "satellite_lla.csv")
     raw_file = Path(args.raw_file).resolve() if args.raw_file else (root / "data" / "GNSS-IMU-Logger" / "Raw_Log" / "V2307A__RAW__20260315_merged.txt")
+    calib_meta = read_pdr_calib_meta(out_dir)
     zupt_mag_csv = out_dir / "zupt_aided_mag_pdr_traj_vel.csv"
     if not zupt_mag_csv.exists():
         raise FileNotFoundError(f"missing {zupt_mag_csv}; run run_pdr_three_impl_part04.py first")
@@ -211,6 +247,9 @@ def main() -> None:
     zupt_mag = pd.read_csv(zupt_mag_csv)
     t = zupt_mag["t_sec_abs"].to_numpy(dtype=float)
     vel = zupt_mag[["vel_x_mps", "vel_y_mps", "vel_z_mps"]].to_numpy(dtype=float)
+    # Calibration must be applied on raw IMU before PDR integration.
+    # Do not re-rotate PDR velocity here using calib bias.
+    corr_reason = "disabled_no_post_pdr_recalibration"
     dt = np.diff(t, prepend=t[0])
     dt[dt <= 0] = 0.0
     label_cols = ["is_moving", "motion_context", "step_event", "zupt_candidate"]
@@ -327,6 +366,12 @@ def main() -> None:
         "inputs": {
             "raw_log_fix_file": str(raw_file),
             "satellite_lla_file": str(sat_csv),
+            "calib_csv": calib_meta["calib_csv"],
+            "calib_loaded": bool(calib_meta["loaded"]),
+            "calib_fallback_identity": bool(calib_meta["fallback_identity"]),
+            "calib_gyro_bz_radps": 0.0,
+            "heading_bias_correction_applied": False,
+            "heading_bias_correction_reason": corr_reason,
             "base_zupt_mag_csv": str(zupt_mag_csv),
             "gnss_raw_fix_csv": str(gnss_raw_csv),
             "gnss_source": gnss_source,

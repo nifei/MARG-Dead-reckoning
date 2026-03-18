@@ -9,12 +9,23 @@ import imufusion
 
 fn = 'handheld_male_rect'
 fn = 'fill_q_handheld_nifei_rect'
+fn = 'from_run_q_fill_q_handheld_nifei_rect'
+fn = 'fill_q_handheld_male_rect'
+fn = 'fill_q_zupt_handheld_male_rect'
+fn = 'fill_q_zupt_handheld_male_rect_20hz'
+fn = 'fill_q_handheld_male_rect_no_lp_no_zupt_dft'
+fn = 'fill_q_handheld_nifei_init'
+fn = 'handheld_nifei_init'
 
 while ('offline_imgs' in os.getcwd()) or ('debug' in os.getcwd()):
     os.chdir("..")
 
 df = pd.read_csv(f'capture/{fn}.csv', index_col=[0], header=[0,1]).reset_index(drop=True)
-
+print('--' * 25, '原始数据', '--' * 50 )
+print('df range', df.index.min(), df.index.max())
+print('--' * 100)
+df['gyro'] *= -1
+df['accel'] *= -1
 if not os.path.exists('./offline_imgs/' + fn):
     print('Creating folder ' + fn)
     os.makedirs('./offline_imgs/' + fn)
@@ -62,10 +73,19 @@ def update(x):
     ans.update({"accel_rrec" : ahrs.flags.acceleration_recovery})
     return ans
 
+print('--' * 100)
+print('df range', df.index.min(), df.index.max())
+print('--' * 100)
 sf = df.apply(update, axis=1)
 sf = pd.DataFrame(list(sf), index=df.index)
+print('--' * 100)
+print('sf range', sf.index.min(), sf.index.max())
+print('yaw', sf['yaw'].values[-10:])
+print('roll', sf['yaw'].values[-10:])
+print('pitch', sf['yaw'].values[-10:])
+print('--' * 100)
 
-print("Plotting YPR...")
+print("Plotting YPR...", 'len(sf)', len(sf), 'len(df)', len(df), 'sf.index.max', sf.index.max())
 plt.style.use('default')
 
 fig, ax = plt.subplots(nrows=6, sharex=True, figsize=(20,15), tight_layout=True, gridspec_kw={"height_ratios": [6, 6, 6, 2, 1, 1]})
