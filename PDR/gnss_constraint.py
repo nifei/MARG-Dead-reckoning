@@ -76,6 +76,8 @@ def apply_gnss_velocity_constraints(
     g_idx = np.clip(g_idx, 0, len(interval_scale) - 1)
     scale = interval_scale[g_idx]
     alpha = interval_alpha[g_idx]
+    gap_flag = interval_gap[g_idx].astype(int)
+    gap_age_s = np.where(gap_flag > 0, np.maximum(0.0, t - g_t[g_idx]), 0.0)
     vel_out = vel * scale[:, None]
     if labels is not None and "motion_context" in labels:
         alpha = np.where(np.asarray(labels["motion_context"], dtype=float) > 0.5, alpha, alpha * c.still_alpha_scale)
@@ -123,9 +125,15 @@ def apply_gnss_velocity_constraints(
             "pos_y_m": pos_out[:, 1],
             "pos_z_m": pos_out[:, 2],
             "heading_fusion_alpha": alpha,
-            "gnss_gap_flag": interval_gap[g_idx].astype(int),
+            "gnss_gap_flag": gap_flag,
+            "gap_age_s": gap_age_s,
         }
     )
+    out_df["heading_reliable_flag"] = (
+        (out_df["gnss_gap_flag"].to_numpy(dtype=int) == 0)
+        & (out_df["speed_mps"].to_numpy(dtype=float) > c.heading_speed_thr_mps)
+        & (out_df["heading_fusion_alpha"].to_numpy(dtype=float) > 0.0)
+    ).astype(int)
     interval_df = pd.DataFrame(rows)
 
     gnss_hd = np.degrees(np.arctan2(np.diff(g_e, prepend=np.nan), np.diff(g_n, prepend=np.nan)))
@@ -137,4 +145,3 @@ def apply_gnss_velocity_constraints(
         "gap_interval_ratio": float(np.mean(interval_gap.astype(float))) if len(interval_gap) else 0.0,
     }
     return out_df, interval_df, metrics
-
