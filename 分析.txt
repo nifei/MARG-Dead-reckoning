@@ -1,0 +1,9 @@
+数据源: handheld_male_rect.csv
+
+流程1: 
+
+run_offline_pdr.py 填充 Q, 生成的姿态文件拷贝到 capture/fill_q_handheld_male_rect.csv
+run_zupt.py 做步态检测, 生成图, is_moving 有规律有效值
+
+流程2: 
+run_offline_pdr.py 填充 Q, 对姿态做 zupt 检测, 生成图, is_moving 无效

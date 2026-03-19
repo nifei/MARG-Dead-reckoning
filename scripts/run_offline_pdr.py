@@ -93,17 +93,29 @@ def compute_ahrs_offline(df, frequency=200):
 
 def compute_quaternions_offline(df, frequency=200):
     ahrs = imufusion.Ahrs()
-    
-    Q_list = []
+    df_new = df
+    # df_new['gyro'] *= -1
+    # df_new['accel'] *= -1
     
     def update(x):
         ahrs.update_no_magnetometer(x['gyro'].to_numpy(), x['accel'].to_numpy(), 0.005)
+        euler = ahrs.quaternion.to_euler()
         Q = ahrs.quaternion.wxyz
-        return Q
+        acceleration = ahrs.earth_acceleration
+        
+        ans = {}
+        ans.update({'x': acceleration[0], 'y': acceleration[1], 'z': acceleration[2]})
+        ans.update({'roll': euler[0], 'pitch': euler[1], 'yaw': euler[2]})
+        ans.update({'Q_T': Q})
+        ans.update({"accel_err": 0.0})
+        ans.update({"accel_igr": False})
+        ans.update({"accel_rec": 0})
+        ans.update({"ang_rrec": False})
+        ans.update({"accel_rrec": False})
+        return ans
     
-    sf = df.apply(update, axis=1)
-    
-    return np.array(list(sf))
+    sf = df_new.apply(update, axis=1)
+    return pd.DataFrame(list(sf), index=df.index)
 
 def run_zupt_analysis(sf, df, frequency=200, zupt_tresh=3, margin=0.15):
     sample_rate = frequency
@@ -394,8 +406,10 @@ def main():
     print(f"文件名将是: fill_q_{fn}.csv")
     
     df = load_capture_csv(csv_path)
-    df['gyro'] *= -1
+    df['gyro'] *= 1
     df['accel'] *= -1
+    # 只对gyro_z取反
+    # df['gyro', 'z'] *= -1
     df_for_save = df.copy()
     print(f"原始数据形状: {df.shape}")
     print('--' * 25, '原始数据', '--' * 50 )
@@ -439,7 +453,7 @@ def main():
     
     print(f"正在使用 imufusion 计算四元数...")
     # Q_array = compute_quaternions_offline(df_processed, frequency=args.frequency)
-    
+    # sf = compute_quaternions_offline(df_processed, frequency=args.frequency)
     sf = compute_ahrs_offline(df_processed, frequency=args.frequency)
     Q_array = np.array([q for q in sf['Q_T']])
     

@@ -82,18 +82,18 @@ The calibration process involves holding the board stationary and pressing "C" t
 
 #### Sensor Values and Ahrs Graphs
 
-![ypr.png](./imgs/handheld_male_rect/ypr.png)
+!\[ypr.png]\(./imgs/handheld\_male\_rect/ypr.png null)
 
 #### Zupt threshols and Step detection Graphs
 
-![path_64.png.png](./imgs/handheld_male_rect/path_61.png)
+!\[path\_64.png.png]\(./imgs/handheld\_male\_rect/path\_61.png null)
 
 #### final 2 dimentional constructed path
 
-![path.png](./imgs/handheld_male_rect/path2D_handheld_male_rect.png)
+!\[path.png]\(./imgs/handheld\_male\_rect/path2D\_handheld\_male\_rect.png null)
 
 ### AHRS
 
-![AHRS_demo.gif](./resources/AHRS_demo.gif)
+!\[AHRS\_demo.gif]\(./resources/AHRS\_demo.gif null)
 
 Negligible drift in heading observed during stationary transmission and over 5 minutes of walking in an enclosed environment.
